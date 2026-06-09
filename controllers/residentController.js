@@ -1,7 +1,22 @@
-const User = require('../models/User');
-const Unit = require('../models/Unit');
+const User    = require('../models/User');
+const Unit    = require('../models/Unit');
+const Estate  = require('../models/Estate');
+const bcrypt  = require('bcryptjs');
 const { sendInviteEmail } = require('../services/emailService');
-const bcrypt = require('bcryptjs');
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const genTempPassword = () => {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let s = 'Estate@';
+  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+};
+
+const residentsLoginUrl = () =>
+  `${process.env.RESIDENTS_URL || process.env.CLIENT_URL || 'http://localhost:5180'}/login`;
+
+// ── List ──────────────────────────────────────────────────────────────────────
 
 exports.getResidents = async (req, res) => {
   try {
@@ -10,7 +25,7 @@ exports.getResidents = async (req, res) => {
 
     if (search) {
       filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
+        { name:  { $regex: search, $options: 'i' } },
         { email: { $regex: search, $options: 'i' } },
       ];
     }
@@ -36,29 +51,111 @@ exports.getResidents = async (req, res) => {
   }
 };
 
+// ── Single invite ─────────────────────────────────────────────────────────────
+// Creates the account immediately + emails login credentials via Resend.
+
 exports.inviteResident = async (req, res) => {
   try {
-    const { email, name, phone, unitId } = req.body;
-    const estate = await require('../models/Estate').findById(req.estateId);
+    const { email, name, phone } = req.body;
+    const estate = await Estate.findById(req.estateId);
 
-    const existing = await User.findOne({ email });
+    const existing = await User.findOne({ email: email.toLowerCase() });
     if (existing) {
       return res.status(409).json({ success: false, message: 'Email already registered' });
     }
 
-    const inviteUrl = `${process.env.CLIENT_URL}/invite/${estate.estateCode}`;
-    await sendInviteEmail({ to: email, name, estateCode: estate.estateCode, estateName: estate.name, inviteUrl });
+    const tempPassword = genTempPassword();
+    const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+    await User.create({
+      name,
+      email: email.toLowerCase(),
+      phone: phone || '',
+      passwordHash,
+      role: 'resident',
+      estateId: req.estateId,
+      isActive: true,
+    });
+
+    await sendInviteEmail({
+      to: email.toLowerCase(),
+      name,
+      estateName: estate.name,
+      loginUrl: residentsLoginUrl(),
+      tempPassword,
+    });
 
     return res.json({
       success: true,
       message: `Invitation sent to ${email}`,
-      data: { estateCode: estate.estateCode, inviteUrl },
     });
   } catch (err) {
-    console.error(err);
+    console.error('[inviteResident]', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
+
+// ── Bulk invite ───────────────────────────────────────────────────────────────
+// Body: { residents: [{ name, email, phone? }] }
+// Creates accounts for each and sends credential emails.
+
+exports.bulkInviteResidents = async (req, res) => {
+  try {
+    const { residents: list } = req.body;
+    if (!Array.isArray(list) || list.length === 0) {
+      return res.status(400).json({ success: false, message: 'Provide a residents array' });
+    }
+    if (list.length > 100) {
+      return res.status(400).json({ success: false, message: 'Maximum 100 residents per bulk invite' });
+    }
+
+    const estate = await Estate.findById(req.estateId);
+    const loginUrl = residentsLoginUrl();
+
+    const results = { sent: [], skipped: [], failed: [] };
+
+    for (const item of list) {
+      const email = (item.email || '').toLowerCase().trim();
+      const name  = (item.name  || '').trim();
+      if (!email || !name) { results.skipped.push({ email, reason: 'Missing name or email' }); continue; }
+
+      try {
+        const existing = await User.findOne({ email });
+        if (existing) { results.skipped.push({ email, reason: 'Already registered' }); continue; }
+
+        const tempPassword = genTempPassword();
+        const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+        await User.create({
+          name,
+          email,
+          phone: item.phone || '',
+          passwordHash,
+          role: 'resident',
+          estateId: req.estateId,
+          isActive: true,
+        });
+
+        await sendInviteEmail({ to: email, name, estateName: estate.name, loginUrl, tempPassword });
+        results.sent.push({ email, name });
+      } catch (e) {
+        console.error('[bulkInvite] error for', email, e.message);
+        results.failed.push({ email, reason: 'Internal error' });
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Sent ${results.sent.length}, skipped ${results.skipped.length}, failed ${results.failed.length}`,
+      data: results,
+    });
+  } catch (err) {
+    console.error('[bulkInviteResidents]', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ── Direct add (no email sent) ────────────────────────────────────────────────
 
 exports.addResident = async (req, res) => {
   try {
@@ -95,6 +192,8 @@ exports.addResident = async (req, res) => {
   }
 };
 
+// ── Suspend / Activate ────────────────────────────────────────────────────────
+
 exports.suspendResident = async (req, res) => {
   try {
     const resident = await User.findOneAndUpdate(
@@ -123,6 +222,8 @@ exports.activateResident = async (req, res) => {
   }
 };
 
+// ── Assign unit ───────────────────────────────────────────────────────────────
+
 exports.assignUnit = async (req, res) => {
   try {
     const { unitId } = req.body;
@@ -133,7 +234,6 @@ exports.assignUnit = async (req, res) => {
       return res.status(400).json({ success: false, message: `Unit is full (max ${unit.maxOccupants || 7} occupants)` });
     }
 
-    // Remove resident from their old unit first
     const resident = await User.findOne({ _id: req.params.id, estateId: req.estateId });
     if (!resident) return res.status(404).json({ success: false, message: 'Resident not found' });
 
@@ -148,12 +248,7 @@ exports.assignUnit = async (req, res) => {
       }
     }
 
-    const updated = await User.findByIdAndUpdate(
-      req.params.id,
-      { unitId },
-      { new: true }
-    );
-
+    const updated = await User.findByIdAndUpdate(req.params.id, { unitId }, { new: true });
     await Unit.findByIdAndUpdate(unitId, {
       $addToSet: { residentIds: resident._id },
       status: 'occupied',

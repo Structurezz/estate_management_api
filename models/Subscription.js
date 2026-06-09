@@ -2,7 +2,10 @@ const mongoose = require('mongoose');
 
 const subscriptionSchema = new mongoose.Schema({
   estateId: { type: mongoose.Schema.Types.ObjectId, ref: 'Estate', required: true, unique: true },
-  planId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Plan', required: true },
+  planId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Plan' },
+
+  billingModel: { type: String, enum: ['flat', 'per_resident'], default: 'flat' },
+  residentCount: { type: Number, default: 0 }, // used for per_resident billing
 
   cycle:  { type: String, enum: ['monthly', 'annual'], default: 'monthly' },
   status: { type: String, enum: ['active', 'trial', 'expired', 'suspended', 'cancelled'], default: 'trial' },
@@ -21,7 +24,6 @@ const subscriptionSchema = new mongoose.Schema({
   pendingCycle:  { type: String },
 }, { timestamps: true });
 
-subscriptionSchema.index({ estateId: 1 });
 subscriptionSchema.index({ status: 1 });
 
 module.exports = mongoose.model('Subscription', subscriptionSchema);

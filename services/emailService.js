@@ -1,70 +1,142 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-const createTransporter = () => {
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT) || 587,
-    secure: false,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-  });
-};
+const getResend = () => new Resend(process.env.RESEND_API_KEY);
+const FROM      = () => process.env.RESEND_FROM || 'Orizu <noreply@areaconnect.pro>';
 
-const sendVisitorPass = async ({ to, visitorName, hostName, code, qrCodeUrl, expectedDate, estateName }) => {
-  if (!process.env.SMTP_USER) return { skipped: true };
+// ── Visitor pass ─────────────────────────────────────────────────────────────
+const sendVisitorPass = async ({ to, visitorName, hostName, code, expectedDate, estateName }) => {
+  if (!process.env.RESEND_API_KEY) return { skipped: true };
 
-  const transporter = createTransporter();
   const dateStr = new Date(expectedDate).toLocaleDateString('en-NG', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   });
 
-  await transporter.sendMail({
-    from: `"${estateName} Estate" <${process.env.SMTP_USER}>`,
+  await getResend().emails.send({
+    from: FROM(),
     to,
     subject: `Your Visitor Pass — ${estateName}`,
-    html: `
-      <div style="font-family:DM Sans,sans-serif;max-width:600px;margin:auto;background:#0B1C3D;color:#fff;border-radius:12px;overflow:hidden;">
-        <div style="background:#C9A84C;padding:20px;text-align:center;">
-          <h1 style="margin:0;font-family:Georgia,serif;font-size:24px;">${estateName}</h1>
-          <p style="margin:4px 0;opacity:.85">Visitor Pass</p>
-        </div>
-        <div style="padding:32px;">
-          <p>Hello <strong>${visitorName}</strong>,</p>
-          <p><strong>${hostName}</strong> has invited you to visit on <strong>${dateStr}</strong>.</p>
-          <div style="background:rgba(255,255,255,.08);border:2px solid #C9A84C;border-radius:10px;padding:24px;text-align:center;margin:24px 0;">
-            <p style="margin:0 0 8px;opacity:.7;font-size:13px;letter-spacing:2px;text-transform:uppercase;">Your Access Code</p>
-            <p style="font-family:monospace;font-size:40px;font-weight:700;color:#C9A84C;letter-spacing:8px;margin:0;">${code}</p>
-          </div>
-          <p style="font-size:13px;opacity:.7">Show this code or the QR code at the security gate. The code is valid for 24 hours after your expected date.</p>
-        </div>
+    html: `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>*{box-sizing:border-box;margin:0;padding:0}</style></head>
+<body style="background:#F0F4F8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:32px 16px;">
+
+<div style="max-width:520px;margin:0 auto;">
+
+  <!-- Logo bar -->
+  <div style="text-align:center;margin-bottom:24px;">
+    <span style="font-size:22px;font-weight:800;letter-spacing:-0.03em;color:#111;">Area<span style="color:#10B981;">Connect</span></span>
+  </div>
+
+  <!-- Card -->
+  <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+    <!-- Header stripe -->
+    <div style="background:linear-gradient(135deg,#10B981,#059669);padding:28px 32px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.75);margin-bottom:6px;">${estateName}</p>
+      <h1 style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.02em;">Visitor Pass</h1>
+    </div>
+
+    <!-- Body -->
+    <div style="padding:32px;">
+      <p style="font-size:15px;color:#374151;line-height:1.6;margin-bottom:24px;">
+        Hi <strong>${visitorName}</strong>,<br>
+        <strong>${hostName}</strong> has invited you to visit on <strong>${dateStr}</strong>.
+        Present the code below at the security gate.
+      </p>
+
+      <!-- Code block -->
+      <div style="background:#F0FDF9;border:2px solid #A7F3D0;border-radius:12px;padding:28px;text-align:center;margin-bottom:24px;">
+        <p style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#059669;margin-bottom:10px;">Access Code</p>
+        <p style="font-family:'Courier New',Courier,monospace;font-size:40px;font-weight:800;color:#047857;letter-spacing:0.3em;">${code}</p>
       </div>
-    `,
+
+      <p style="font-size:13px;color:#6B7280;line-height:1.6;">
+        Valid for 24 hours after your expected arrival date. If you have any issues, contact your host directly.
+      </p>
+    </div>
+  </div>
+
+  <p style="text-align:center;font-size:12px;color:#9CA3AF;margin-top:20px;">Powered by AreaConnect</p>
+</div>
+</body></html>`,
   });
 
   return { sent: true };
 };
 
-const sendInviteEmail = async ({ to, name, estateCode, estateName, inviteUrl }) => {
-  if (!process.env.SMTP_USER) return { skipped: true };
+// ── Resident invite ───────────────────────────────────────────────────────────
+const sendInviteEmail = async ({ to, name, estateName, loginUrl, tempPassword }) => {
+  if (!process.env.RESEND_API_KEY) return { skipped: true };
 
-  const transporter = createTransporter();
-  await transporter.sendMail({
-    from: `"${estateName} Estate" <${process.env.SMTP_USER}>`,
+  await getResend().emails.send({
+    from: FROM(),
     to,
-    subject: `You've been invited to join ${estateName} Estate`,
-    html: `
-      <div style="font-family:DM Sans,sans-serif;max-width:600px;margin:auto;">
-        <h2>Welcome to ${estateName}!</h2>
-        <p>Hi ${name},</p>
-        <p>You've been invited to join the estate management portal. Use the code below to register:</p>
-        <div style="background:#0B1C3D;color:#C9A84C;padding:20px;text-align:center;border-radius:8px;font-family:monospace;font-size:32px;letter-spacing:6px;margin:20px 0;">
-          ${estateCode}
+    subject: `You're invited to ${estateName} — your login details`,
+    html: `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>*{box-sizing:border-box;margin:0;padding:0}</style></head>
+<body style="background:#F0F4F8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:32px 16px;">
+
+<div style="max-width:520px;margin:0 auto;">
+
+  <!-- Logo bar -->
+  <div style="text-align:center;margin-bottom:24px;">
+    <span style="font-size:22px;font-weight:800;letter-spacing:-0.03em;color:#111;">Area<span style="color:#10B981;">Connect</span></span>
+  </div>
+
+  <!-- Card -->
+  <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+    <!-- Header stripe -->
+    <div style="background:linear-gradient(135deg,#10B981,#059669);padding:28px 32px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.75);margin-bottom:6px;">${estateName}</p>
+      <h1 style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.02em;">Welcome to AreaMates</h1>
+    </div>
+
+    <!-- Body -->
+    <div style="padding:32px;">
+      <p style="font-size:15px;color:#374151;line-height:1.6;margin-bottom:28px;">
+        Hi <strong>${name}</strong>, your estate manager has added you to <strong>${estateName}</strong>.
+        Use the credentials below to sign in.
+      </p>
+
+      <!-- Credentials -->
+      <div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:12px;padding:24px;margin-bottom:28px;">
+        <p style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#9CA3AF;margin-bottom:16px;">Your Login Credentials</p>
+
+        <div style="margin-bottom:16px;">
+          <p style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#9CA3AF;margin-bottom:4px;">Email</p>
+          <p style="font-size:15px;font-weight:600;color:#111827;">${to}</p>
         </div>
-        ${inviteUrl ? `<p><a href="${inviteUrl}" style="background:#0B1C3D;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;">Register Now</a></p>` : ''}
+
+        <div style="border-top:1px solid #E5E7EB;padding-top:16px;">
+          <p style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#9CA3AF;margin-bottom:8px;">Temporary Password</p>
+          <p style="font-family:'Courier New',Courier,monospace;font-size:22px;font-weight:800;letter-spacing:0.1em;color:#047857;background:#F0FDF9;border:1px solid #A7F3D0;border-radius:8px;padding:10px 14px;display:inline-block;">${tempPassword}</p>
+        </div>
       </div>
-    `,
+
+      <!-- CTA -->
+      <div style="text-align:center;margin-bottom:24px;">
+        <a href="${loginUrl}"
+          style="display:inline-block;background:linear-gradient(135deg,#10B981,#059669);color:#fff;font-weight:700;font-size:15px;text-decoration:none;padding:14px 40px;border-radius:10px;letter-spacing:-0.01em;">
+          Sign In to AreaMates →
+        </a>
+      </div>
+
+      <!-- Security tip -->
+      <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:14px 16px;">
+        <p style="font-size:13px;color:#92400E;line-height:1.5;">
+          <strong>Security tip:</strong> Change your password after your first login. Keep your credentials private.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <p style="text-align:center;font-size:12px;color:#9CA3AF;margin-top:20px;">
+    If you didn't expect this email, you can safely ignore it. &nbsp;·&nbsp; Powered by AreaConnect
+  </p>
+</div>
+</body></html>`,
   });
 
   return { sent: true };

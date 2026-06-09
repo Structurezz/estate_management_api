@@ -8,8 +8,9 @@ const planSchema = new mongoose.Schema({
   badge: { type: String, default: '' },
 
   price: {
-    monthly: { type: Number, default: 0 },
-    annual:  { type: Number, default: 0 },
+    monthly:    { type: Number, default: 0 },
+    annual:     { type: Number, default: 0 },
+    perResident: { type: Number, default: 0 }, // per-resident/month billing model
   },
 
   features: {

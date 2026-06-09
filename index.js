@@ -7,7 +7,6 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
 const mongoSanitize = require('express-mongo-sanitize');
-const rateLimit = require('express-rate-limit');
 const path = require('path');
 
 const { initSocket } = require('./services/socketService');
@@ -24,8 +23,15 @@ app.use(mongoSanitize());
 
 // CORS
 const allowedOrigins = process.env.NODE_ENV === 'production'
-  ? (process.env.CLIENT_URL || '').split(',').map(o => o.trim())
-  : [5173, 5174, 5175, 5176, 5177, 5178].map(p => `http://localhost:${p}`);
+  ? [
+      process.env.CLIENT_URL,
+      process.env.RESIDENTS_URL,
+      process.env.ADMIN_URL,
+      process.env.SECURITY_URL,
+      'https://area-mates.areaconnect.pro',
+      'https://area-connector.areaconnect.pro',
+    ].filter(Boolean).flatMap(o => o.split(',').map(s => s.trim()))
+  : [5173, 5174, 5175, 5176, 5177, 5178, 5180, 5181].map(p => `http://localhost:${p}`);
 
 app.use(cors({
   origin: allowedOrigins,
@@ -46,15 +52,8 @@ if (process.env.NODE_ENV !== 'test') {
 // Static files for uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Rate limiting on auth routes
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  message: { success: false, message: 'Too many requests, please try again later.' },
-});
-
 // Routes
-app.use('/api/auth', authLimiter, require('./routes/auth'));
+app.use('/api/auth', require('./routes/auth'));
 app.use('/api/estates', require('./routes/estates'));
 app.use('/api/visitors', require('./routes/visitors'));
 app.use('/api/residents', require('./routes/residents'));
@@ -68,10 +67,26 @@ app.use('/api/payments', require('./routes/payments'));
 app.use('/api/plans', require('./routes/plans'));
 app.use('/api/events', require('./routes/events'));
 app.use('/api/polls', require('./routes/polls'));
+app.use('/api/lounge', require('./routes/lounge'));
 
 // Health check
 app.get('/health', (req, res) => {
   res.json({ success: true, message: 'Estate Management API running', timestamp: new Date() });
+});
+
+// One-time demo seed endpoint
+app.post('/api/seed-demo', async (req, res) => {
+  const seedSecret = process.env.SEED_SECRET || 'area_connect_seed_2024';
+  if (req.headers['x-seed-secret'] !== seedSecret) {
+    return res.status(403).json({ success: false, message: 'Forbidden' });
+  }
+  try {
+    const seed = require('./utils/seed');
+    await seed();
+    res.json({ success: true, message: 'Demo data seeded' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 // 404 handler

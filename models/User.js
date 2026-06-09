@@ -17,6 +17,12 @@ const userSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true },
   refreshToken: { type: String, default: null },
   lastSeen: { type: Date, default: Date.now },
+  walletBalance: { type: Number, default: 0 },
+  paystackRecipientCode: { type: String, default: null },
+  bankCode: { type: String, default: '' },
+  bankName: { type: String, default: '' },
+  accountNumber: { type: String, default: '' },
+  accountName: { type: String, default: '' },
 }, { timestamps: true });
 
 userSchema.methods.comparePassword = async function (password) {

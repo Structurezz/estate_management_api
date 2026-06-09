@@ -87,7 +87,7 @@ exports.getMySubscription = async (req, res) => {
 
 exports.assignSubscription = async (req, res) => {
   try {
-    const { estateId, planId, cycle, status, trialDays, notes } = req.body;
+    const { estateId, planId, cycle, status, trialDays, notes, billingModel, residentCount } = req.body;
 
     const plan = await Plan.findById(planId);
     if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
@@ -105,6 +105,8 @@ exports.assignSubscription = async (req, res) => {
       { estateId },
       {
         planId, cycle: cycle || 'monthly',
+        billingModel: billingModel || 'flat',
+        residentCount: residentCount || 0,
         status: status || (trialDays ? 'trial' : 'active'),
         startDate: now,
         trialEndsAt,
@@ -142,13 +144,19 @@ exports.updateSubscription = async (req, res) => {
 
 exports.initializeUpgrade = async (req, res) => {
   try {
-    const { planId, cycle } = req.body;
+    const { planId, cycle, billingModel, residentCount } = req.body;
     const estateId = req.estateId;
 
     const plan = await Plan.findById(planId);
     if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
 
-    const amount = cycle === 'annual' ? plan.price.annual : plan.price.monthly;
+    let amount;
+    if (billingModel === 'per_resident') {
+      if (!plan.price.perResident) return res.status(400).json({ success: false, message: 'Per-resident pricing not available for this plan' });
+      amount = (residentCount || 1) * plan.price.perResident;
+    } else {
+      amount = cycle === 'annual' ? plan.price.annual : plan.price.monthly;
+    }
 
     if (amount === 0) {
       // Free plan — just switch directly
@@ -183,6 +191,8 @@ exports.initializeUpgrade = async (req, res) => {
         planId: plan._id.toString(),
         planName: plan.name,
         cycle,
+        billingModel: billingModel || 'flat',
+        residentCount: residentCount || 0,
         managerId: req.user._id.toString(),
       },
     }, { headers: paystackHeaders() });
@@ -215,9 +225,11 @@ exports.verifyUpgrade = async (req, res) => {
     }
 
     const meta = data.data.metadata;
-    const estateId = meta.estateId;
-    const planId   = meta.planId;
-    const cycle    = meta.cycle;
+    const estateId     = meta.estateId;
+    const planId       = meta.planId;
+    const cycle        = meta.cycle;
+    const billingModel = meta.billingModel || 'flat';
+    const residentCount = meta.residentCount || 0;
 
     const plan = await Plan.findById(planId);
     if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
@@ -229,7 +241,7 @@ exports.verifyUpgrade = async (req, res) => {
     const sub = await Subscription.findOneAndUpdate(
       { estateId },
       {
-        planId, cycle, status: 'active',
+        planId, cycle, billingModel, residentCount, status: 'active',
         startDate: now, nextBillingDate: next,
         $unset: { pendingRef: '', pendingPlanId: '', pendingCycle: '' },
         updatedBy: req.user._id,

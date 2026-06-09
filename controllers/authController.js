@@ -2,6 +2,8 @@ const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const Estate = require('../models/Estate');
 const Unit = require('../models/Unit');
+const Plan = require('../models/Plan');
+const Subscription = require('../models/Subscription');
 const { generateAccessToken, generateRefreshToken, verifyRefreshToken } = require('../services/tokenService');
 
 const COOKIE_OPTS = {
@@ -13,7 +15,7 @@ const COOKIE_OPTS = {
 
 exports.register = async (req, res) => {
   try {
-    const { name, email, phone, password, role, estateCode } = req.body;
+    const { name, email, phone, password, role, estateCode, estateName, estateAddress, billingModel, cycle } = req.body;
 
     const exists = await User.findOne({ email });
     if (exists) {
@@ -21,8 +23,49 @@ exports.register = async (req, res) => {
     }
 
     let estateId = null;
-    let unitId = null;
+    let estateData = null;
 
+    if (role === 'estate_manager') {
+      if (!estateName || !estateAddress) {
+        return res.status(400).json({ success: false, message: 'Estate name and address are required' });
+      }
+
+      const passwordHash = await bcrypt.hash(password, 12);
+      const user = await User.create({ name, email, phone, passwordHash, role: 'estate_manager' });
+
+      // Create estate and link manager
+      const estate = await Estate.create({ name: estateName, address: estateAddress, managerId: user._id });
+      user.estateId = estate._id;
+      const accessToken = generateAccessToken(user._id, user.role, estate._id);
+      const refreshToken = generateRefreshToken(user._id);
+      user.refreshToken = refreshToken;
+      await user.save();
+
+      // Start 14-day trial on Growth plan if it exists
+      const growthPlan = await Plan.findOne({ slug: 'growth', isActive: true });
+      if (growthPlan) {
+        const trialEndsAt = new Date(Date.now() + 14 * 86400000);
+        await Subscription.create({
+          estateId: estate._id,
+          planId: growthPlan._id,
+          billingModel: billingModel || 'flat',
+          cycle: cycle || 'monthly',
+          status: 'trial',
+          trialEndsAt,
+          nextBillingDate: trialEndsAt,
+          startDate: new Date(),
+        });
+      }
+
+      res.cookie('refreshToken', refreshToken, COOKIE_OPTS);
+      return res.status(201).json({
+        success: true,
+        message: 'Registration successful',
+        data: { user: user.toSafeObject(), accessToken, estate },
+      });
+    }
+
+    // Resident / security — require estate code
     if (role === 'resident' || role === 'security') {
       if (!estateCode) {
         return res.status(400).json({ success: false, message: 'Estate code required for this role' });
@@ -32,6 +75,7 @@ exports.register = async (req, res) => {
         return res.status(404).json({ success: false, message: 'Invalid estate code' });
       }
       estateId = estate._id;
+      estateData = estate;
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
@@ -40,21 +84,18 @@ exports.register = async (req, res) => {
       passwordHash,
       role: role || 'resident',
       estateId,
-      unitId,
     });
 
     const accessToken = generateAccessToken(user._id, user.role, user.estateId);
     const refreshToken = generateRefreshToken(user._id);
-
     user.refreshToken = refreshToken;
     await user.save();
 
     res.cookie('refreshToken', refreshToken, COOKIE_OPTS);
-
     return res.status(201).json({
       success: true,
       message: 'Registration successful',
-      data: { user: user.toSafeObject(), accessToken },
+      data: { user: user.toSafeObject(), accessToken, estate: estateData },
     });
   } catch (err) {
     console.error(err);
@@ -90,10 +131,14 @@ exports.login = async (req, res) => {
       estateData = await Estate.findById(user.estateId).select('name estateCode logoUrl');
     }
 
+    const populatedUser = await User.findById(user._id)
+      .populate('unitId', 'unitNumber block type')
+      .populate('estateId', 'name estateCode logoUrl');
+
     return res.json({
       success: true,
       message: 'Login successful',
-      data: { user: user.toSafeObject(), accessToken, estate: estateData },
+      data: { user: populatedUser.toSafeObject(), accessToken, estate: estateData },
     });
   } catch (err) {
     console.error(err);

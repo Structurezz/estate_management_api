@@ -250,7 +250,9 @@ const seed = async () => {
   process.exit(0);
 };
 
-seed().catch(err => {
-  console.error('Seed failed:', err);
-  process.exit(1);
-});
+// Run directly: node utils/seed.js
+if (require.main === module) {
+  seed().catch(err => { console.error('Seed failed:', err); process.exit(1); });
+}
+
+module.exports = seed;

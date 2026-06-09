@@ -4,7 +4,7 @@ const initSocket = (server) => {
   const { Server } = require('socket.io');
   const allowedOrigins = process.env.NODE_ENV === 'production'
     ? (process.env.CLIENT_URL || '').split(',').map(o => o.trim())
-    : [5173, 5174, 5175, 5176, 5177, 5178].map(p => `http://localhost:${p}`);
+    : true; // allow all origins in dev (covers web + React Native mobile)
 
   io = new Server(server, {
     cors: {

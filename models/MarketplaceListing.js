@@ -19,8 +19,12 @@ const marketplaceListingSchema = new mongoose.Schema({
   },
   contactPhone: { type: String, default: '' },
   views: { type: Number, default: 0 },
+  condition: { type: String, enum: ['new', 'like_new', 'good', 'fair'], default: 'good' },
+  isNegotiable: { type: Boolean, default: false },
+  savedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
 }, { timestamps: true });
 
 marketplaceListingSchema.index({ estateId: 1, category: 1, status: 1 });
+marketplaceListingSchema.index({ title: 'text', description: 'text', tags: 'text' });
 
 module.exports = mongoose.model('MarketplaceListing', marketplaceListingSchema);

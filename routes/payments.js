@@ -9,6 +9,20 @@ router.use(authenticate, scopeToEstate, requireEstate);
 // ── Stats (manager) ─────────────────────────────────────────────
 router.get('/stats', authorize('estate_manager', 'super_admin'), ctrl.getPaymentStats);
 
+// ── Wallet (manager) ─────────────────────────────────────────────
+router.get('/wallet', authorize('estate_manager', 'super_admin'), ctrl.getWallet);
+
+router.get('/wallet/banks', authorize('estate_manager', 'super_admin'), ctrl.getBanks);
+
+router.post('/wallet/bank', authorize('estate_manager', 'super_admin'), [
+  body('bankCode').notEmpty().withMessage('Bank is required'),
+  body('accountNumber').isLength({ min: 10, max: 10 }).withMessage('Account number must be 10 digits'),
+], validate, ctrl.saveBankAccount);
+
+router.post('/wallet/withdraw', authorize('estate_manager', 'super_admin'), [
+  body('amount').isFloat({ min: 100 }).withMessage('Minimum withdrawal is ₦100'),
+], validate, ctrl.withdrawFromWallet);
+
 // ── Schedules (manager) ─────────────────────────────────────────
 router.get('/schedules', authorize('estate_manager', 'super_admin'), ctrl.getSchedules);
 
